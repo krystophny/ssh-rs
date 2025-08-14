@@ -36,7 +36,7 @@ pub trait AsyncSessionStream {
             op,
             sess,
             BlockDirections::Both,
-            Some(Duration::from_millis(1)),
+            None, // Don't force sleep, let x_with handle idle properly
         )
         .await
     }
@@ -50,7 +50,7 @@ pub trait AsyncSessionStream {
             op,
             sess,
             BlockDirections::None,
-            Some(Duration::from_millis(1)),
+            None, // Don't force sleep, let x_with handle idle properly
         )
         .await
     }
@@ -64,7 +64,7 @@ pub trait AsyncSessionStream {
             op,
             sess,
             BlockDirections::Inbound,
-            Some(Duration::from_millis(1)),
+            None, // Don't force sleep, let x_with handle idle properly
         )
         .await
     }
@@ -78,7 +78,7 @@ pub trait AsyncSessionStream {
             op,
             sess,
             BlockDirections::Outbound,
-            Some(Duration::from_millis(1)),
+            None, // Don't force sleep, let x_with handle idle properly
         )
         .await
     }
@@ -104,7 +104,7 @@ pub trait AsyncSessionStream {
             op,
             sess,
             BlockDirections::Inbound,
-            Some(Duration::from_millis(1)),
+            None, // Don't force sleep, let poll_x_with handle idle properly
         )
     }
 
@@ -119,7 +119,7 @@ pub trait AsyncSessionStream {
             op,
             sess,
             BlockDirections::Both,
-            Some(Duration::from_millis(1)),
+            None, // Don't force sleep, let poll_x_with handle idle properly
         )
     }
 }
