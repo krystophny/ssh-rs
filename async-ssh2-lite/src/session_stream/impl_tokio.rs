@@ -62,10 +62,6 @@ impl AsyncSessionStream for TcpStream {
                 }
             }
 
-            // Sleep after I/O if requested
-            if let Some(dur) = sleep_dur {
-                sleep_async_fn(dur).await;
-            }
         }
     }
 
@@ -112,10 +108,8 @@ impl AsyncSessionStream for TcpStream {
             }
         }
 
-        // After handling I/O, retry the operation
-        let waker = cx.waker().clone();
-        waker.wake();
-
+        // The I/O readiness is registered, return Pending.
+        // Tokio reactor will wake us when the socket is ready.
         Poll::Pending
     }
 }
@@ -168,10 +162,6 @@ impl AsyncSessionStream for UnixStream {
                 }
             }
 
-            // Sleep after I/O if requested
-            if let Some(dur) = sleep_dur {
-                sleep_async_fn(dur).await;
-            }
         }
     }
 
@@ -218,10 +208,8 @@ impl AsyncSessionStream for UnixStream {
             }
         }
 
-        // After handling I/O, retry the operation
-        let waker = cx.waker().clone();
-        waker.wake();
-
+        // The I/O readiness is registered, return Pending.
+        // Tokio reactor will wake us when the socket is ready.
         Poll::Pending
     }
 }
