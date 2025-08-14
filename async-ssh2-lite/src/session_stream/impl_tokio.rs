@@ -37,7 +37,16 @@ impl AsyncSessionStream for TcpStream {
             // Wait for whatever I/O the session needs, not what we expect.
             // The session knows the aggregate state of all channels.
             match sess.block_directions() {
-                BlockDirections::None => continue,
+                BlockDirections::None => {
+                    // No I/O needed right now. Sleep if requested.
+                    if let Some(dur) = sleep_dur {
+                        sleep_async_fn(dur).await;
+                    } else {
+                        // Without a sleep duration, yield to avoid busy loop
+                        tokio::task::yield_now().await;
+                    }
+                    continue;
+                }
                 BlockDirections::Inbound => {
                     // Session needs to read data (could be for any channel)
                     self.readable().await?
@@ -53,6 +62,7 @@ impl AsyncSessionStream for TcpStream {
                 }
             }
 
+            // Sleep after I/O if requested
             if let Some(dur) = sleep_dur {
                 sleep_async_fn(dur).await;
             }
@@ -75,7 +85,18 @@ impl AsyncSessionStream for TcpStream {
         // Wait for whatever I/O the session needs, not what we expect.
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
-            BlockDirections::None => return Poll::Pending,
+            BlockDirections::None => {
+                // No I/O needed right now. Schedule a wake-up if requested,
+                // otherwise just return Pending without immediate wake.
+                if let Some(dur) = sleep_dur {
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        sleep_async_fn(dur).await;
+                        waker.wake();
+                    });
+                }
+                return Poll::Pending;
+            }
             BlockDirections::Inbound => {
                 // Session needs to read data (could be for any channel)
                 ready!(self.poll_read_ready(cx))?;
@@ -91,16 +112,9 @@ impl AsyncSessionStream for TcpStream {
             }
         }
 
-        if let Some(dur) = sleep_dur {
-            let waker = cx.waker().clone();
-            tokio::spawn(async move {
-                sleep_async_fn(dur).await;
-                waker.wake();
-            });
-        } else {
-            let waker = cx.waker().clone();
-            waker.wake();
-        }
+        // After handling I/O, retry the operation
+        let waker = cx.waker().clone();
+        waker.wake();
 
         Poll::Pending
     }
@@ -129,7 +143,16 @@ impl AsyncSessionStream for UnixStream {
             // Wait for whatever I/O the session needs, not what we expect.
             // The session knows the aggregate state of all channels.
             match sess.block_directions() {
-                BlockDirections::None => continue,
+                BlockDirections::None => {
+                    // No I/O needed right now. Sleep if requested.
+                    if let Some(dur) = sleep_dur {
+                        sleep_async_fn(dur).await;
+                    } else {
+                        // Without a sleep duration, yield to avoid busy loop
+                        tokio::task::yield_now().await;
+                    }
+                    continue;
+                }
                 BlockDirections::Inbound => {
                     // Session needs to read data (could be for any channel)
                     self.readable().await?
@@ -145,6 +168,7 @@ impl AsyncSessionStream for UnixStream {
                 }
             }
 
+            // Sleep after I/O if requested
             if let Some(dur) = sleep_dur {
                 sleep_async_fn(dur).await;
             }
@@ -167,7 +191,18 @@ impl AsyncSessionStream for UnixStream {
         // Wait for whatever I/O the session needs, not what we expect.
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
-            BlockDirections::None => return Poll::Pending,
+            BlockDirections::None => {
+                // No I/O needed right now. Schedule a wake-up if requested,
+                // otherwise just return Pending without immediate wake.
+                if let Some(dur) = sleep_dur {
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        sleep_async_fn(dur).await;
+                        waker.wake();
+                    });
+                }
+                return Poll::Pending;
+            }
             BlockDirections::Inbound => {
                 // Session needs to read data (could be for any channel)
                 ready!(self.poll_read_ready(cx))?;
@@ -183,16 +218,9 @@ impl AsyncSessionStream for UnixStream {
             }
         }
 
-        if let Some(dur) = sleep_dur {
-            let waker = cx.waker().clone();
-            tokio::spawn(async move {
-                sleep_async_fn(dur).await;
-                waker.wake();
-            });
-        } else {
-            let waker = cx.waker().clone();
-            waker.wake();
-        }
+        // After handling I/O, retry the operation
+        let waker = cx.waker().clone();
+        waker.wake();
 
         Poll::Pending
     }
