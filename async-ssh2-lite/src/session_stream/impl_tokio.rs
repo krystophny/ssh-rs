@@ -56,11 +56,23 @@ impl AsyncSessionStream for TcpStream {
                     self.writable().await?
                 }
                 BlockDirections::Both => {
-                    // Session needs both read and write, but we should wait for either
-                    // rather than both simultaneously to avoid deadlock
-                    tokio::select! {
-                        res = self.readable() => res?,
-                        res = self.writable() => res?,
+                    // Session needs both read and write capability
+                    // Use a timeout to prevent indefinite blocking
+                    let ready_result = tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        self.ready(tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE)
+                    ).await;
+                    
+                    match ready_result {
+                        Ok(Ok(_)) => {}, // Both ready
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => {
+                            // Timeout - try either readable or writable
+                            tokio::select! {
+                                res = self.readable() => res?,
+                                res = self.writable() => res?,
+                            }
+                        }
                     }
                 }
             }
@@ -105,16 +117,25 @@ impl AsyncSessionStream for TcpStream {
                 ready!(self.poll_write_ready(cx))?;
             }
             BlockDirections::Both => {
-                // Session needs both read and write, check if either is ready
-                // This prevents deadlock when only one direction is available
-                if self.poll_write_ready(cx).is_ready() {
-                    ready!(self.poll_write_ready(cx))?;
-                } else if self.poll_read_ready(cx).is_ready() {
-                    ready!(self.poll_read_ready(cx))?;
-                } else {
-                    // Neither is ready, register for both and return Pending
-                    let _ = self.poll_write_ready(cx);
-                    let _ = self.poll_read_ready(cx);
+                // Session needs both read and write
+                // Try to get both ready, but fall back to either if needed
+                match (self.poll_write_ready(cx), self.poll_read_ready(cx)) {
+                    (Poll::Ready(Ok(_)), Poll::Ready(Ok(_))) => {
+                        // Both ready - great!
+                    }
+                    (Poll::Ready(Ok(_)), _) => {
+                        // Write ready - use it
+                        ready!(self.poll_write_ready(cx))?;
+                    }
+                    (_, Poll::Ready(Ok(_))) => {
+                        // Read ready - use it
+                        ready!(self.poll_read_ready(cx))?;
+                    }
+                    _ => {
+                        // Neither ready yet, register for both
+                        let _ = self.poll_write_ready(cx);
+                        let _ = self.poll_read_ready(cx);
+                    }
                 }
             }
         }
@@ -167,11 +188,23 @@ impl AsyncSessionStream for UnixStream {
                     self.writable().await?
                 }
                 BlockDirections::Both => {
-                    // Session needs both read and write, but we should wait for either
-                    // rather than both simultaneously to avoid deadlock
-                    tokio::select! {
-                        res = self.readable() => res?,
-                        res = self.writable() => res?,
+                    // Session needs both read and write capability
+                    // Use a timeout to prevent indefinite blocking
+                    let ready_result = tokio::time::timeout(
+                        std::time::Duration::from_millis(100),
+                        self.ready(tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE)
+                    ).await;
+                    
+                    match ready_result {
+                        Ok(Ok(_)) => {}, // Both ready
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => {
+                            // Timeout - try either readable or writable
+                            tokio::select! {
+                                res = self.readable() => res?,
+                                res = self.writable() => res?,
+                            }
+                        }
                     }
                 }
             }
@@ -216,16 +249,25 @@ impl AsyncSessionStream for UnixStream {
                 ready!(self.poll_write_ready(cx))?;
             }
             BlockDirections::Both => {
-                // Session needs both read and write, check if either is ready
-                // This prevents deadlock when only one direction is available
-                if self.poll_write_ready(cx).is_ready() {
-                    ready!(self.poll_write_ready(cx))?;
-                } else if self.poll_read_ready(cx).is_ready() {
-                    ready!(self.poll_read_ready(cx))?;
-                } else {
-                    // Neither is ready, register for both and return Pending
-                    let _ = self.poll_write_ready(cx);
-                    let _ = self.poll_read_ready(cx);
+                // Session needs both read and write
+                // Try to get both ready, but fall back to either if needed
+                match (self.poll_write_ready(cx), self.poll_read_ready(cx)) {
+                    (Poll::Ready(Ok(_)), Poll::Ready(Ok(_))) => {
+                        // Both ready - great!
+                    }
+                    (Poll::Ready(Ok(_)), _) => {
+                        // Write ready - use it
+                        ready!(self.poll_write_ready(cx))?;
+                    }
+                    (_, Poll::Ready(Ok(_))) => {
+                        // Read ready - use it
+                        ready!(self.poll_read_ready(cx))?;
+                    }
+                    _ => {
+                        // Neither ready yet, register for both
+                        let _ = self.poll_write_ready(cx);
+                        let _ = self.poll_read_ready(cx);
+                    }
                 }
             }
         }
