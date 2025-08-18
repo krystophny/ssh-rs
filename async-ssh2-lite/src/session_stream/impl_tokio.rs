@@ -83,6 +83,13 @@ impl AsyncSessionStream for TcpStream {
         match sess.block_directions() {
             BlockDirections::None => {
                 println!("poll Block None");
+                // No I/O needed - schedule a waker to retry later
+                let waker = cx.waker().clone();
+                let dur = sleep_dur.unwrap_or(Duration::from_millis(1));
+                tokio::spawn(async move {
+                    sleep_async_fn(dur).await;
+                    waker.wake();
+                });
                 return Poll::Pending;
             }
             BlockDirections::Inbound => {
@@ -103,17 +110,8 @@ impl AsyncSessionStream for TcpStream {
             }
         }
 
-        if let Some(dur) = sleep_dur {
-            let waker = cx.waker().clone();
-            tokio::spawn(async move {
-                sleep_async_fn(dur).await;
-                waker.wake();
-            });
-        } else {
-            let waker = cx.waker().clone();
-            waker.wake();
-        }
-
+        // The socket readiness checks above (poll_read_ready/poll_write_ready) already
+        // registered the waker with the reactor, so we just return Pending
         Poll::Pending
     }
 }
@@ -179,7 +177,16 @@ impl AsyncSessionStream for UnixStream {
         // Wait for whatever I/O the session needs, not what we expect.
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
-            BlockDirections::None => return Poll::Pending,
+            BlockDirections::None => {
+                // No I/O needed - schedule a waker to retry later
+                let waker = cx.waker().clone();
+                let dur = sleep_dur.unwrap_or(Duration::from_millis(1));
+                tokio::spawn(async move {
+                    sleep_async_fn(dur).await;
+                    waker.wake();
+                });
+                return Poll::Pending;
+            }
             BlockDirections::Inbound => {
                 // Session needs to read data (could be for any channel)
                 ready!(self.poll_read_ready(cx))?;
@@ -195,17 +202,8 @@ impl AsyncSessionStream for UnixStream {
             }
         }
 
-        if let Some(dur) = sleep_dur {
-            let waker = cx.waker().clone();
-            tokio::spawn(async move {
-                sleep_async_fn(dur).await;
-                waker.wake();
-            });
-        } else {
-            let waker = cx.waker().clone();
-            waker.wake();
-        }
-
+        // The socket readiness checks above (poll_read_ready/poll_write_ready) already
+        // registered the waker with the reactor, so we just return Pending
         Poll::Pending
     }
 }
