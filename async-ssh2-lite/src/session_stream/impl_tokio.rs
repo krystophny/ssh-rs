@@ -37,16 +37,22 @@ impl AsyncSessionStream for TcpStream {
             // Wait for whatever I/O the session needs, not what we expect.
             // The session knows the aggregate state of all channels.
             match sess.block_directions() {
-                BlockDirections::None => continue,
+                BlockDirections::None => {
+                    println!("Block None");
+                    continue;
+                }
                 BlockDirections::Inbound => {
+                    println!("Block inbound");
                     // Session needs to read data (could be for any channel)
                     self.readable().await?
                 }
                 BlockDirections::Outbound => {
                     // Session needs to write data (could be for any channel)
+                    println!("Block outbound");
                     self.writable().await?
                 }
                 BlockDirections::Both => {
+                    println!("Block Both");
                     // Session needs both read and write
                     self.ready(tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE)
                         .await?;
@@ -75,16 +81,22 @@ impl AsyncSessionStream for TcpStream {
         // Wait for whatever I/O the session needs, not what we expect.
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
-            BlockDirections::None => return Poll::Pending,
+            BlockDirections::None => {
+                println!("poll Block None");
+                return Poll::Pending;
+            }
             BlockDirections::Inbound => {
+                println!("poll Block Inbound");
                 // Session needs to read data (could be for any channel)
                 ready!(self.poll_read_ready(cx))?;
             }
             BlockDirections::Outbound => {
-                // Session needs to write data (could be for any channel)  
+                println!("poll Block Outbound");
+                // Session needs to write data (could be for any channel)
                 ready!(self.poll_write_ready(cx))?;
             }
             BlockDirections::Both => {
+                println!("poll Block both");
                 // Session needs both read and write
                 ready!(self.poll_write_ready(cx))?;
                 ready!(self.poll_read_ready(cx))?;
@@ -173,7 +185,7 @@ impl AsyncSessionStream for UnixStream {
                 ready!(self.poll_read_ready(cx))?;
             }
             BlockDirections::Outbound => {
-                // Session needs to write data (could be for any channel)  
+                // Session needs to write data (could be for any channel)
                 ready!(self.poll_write_ready(cx))?;
             }
             BlockDirections::Both => {
