@@ -34,4 +34,7 @@ mod integration_tests {
 
     #[cfg(test)]
     mod tokio_spawn_session;
+
+    #[cfg(test)]
+    mod session__polling_behavior;
 }

@@ -65,7 +65,7 @@ impl AsyncSessionStream for TcpStream {
                     
                     match ready_result {
                         Ok(Ok(_)) => {}, // Both ready
-                        Ok(Err(e)) => return Err(e),
+                        Ok(Err(e)) => return Err(Error::Io(e)),
                         Err(_) => {
                             // Timeout - try either readable or writable
                             tokio::select! {
@@ -97,15 +97,14 @@ impl AsyncSessionStream for TcpStream {
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
             BlockDirections::None => {
-                // No I/O needed right now. Schedule a wake-up if requested,
-                // otherwise just return Pending without immediate wake.
-                if let Some(dur) = sleep_dur {
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        sleep_async_fn(dur).await;
-                        waker.wake();
-                    });
-                }
+                // No I/O needed right now. Schedule a wake-up.
+                // IMPORTANT: We must always schedule a waker when returning Pending!
+                let waker = cx.waker().clone();
+                let dur = sleep_dur.unwrap_or(Duration::from_millis(1));
+                tokio::spawn(async move {
+                    sleep_async_fn(dur).await;
+                    waker.wake();
+                });
                 return Poll::Pending;
             }
             BlockDirections::Inbound => {
@@ -197,7 +196,7 @@ impl AsyncSessionStream for UnixStream {
                     
                     match ready_result {
                         Ok(Ok(_)) => {}, // Both ready
-                        Ok(Err(e)) => return Err(e),
+                        Ok(Err(e)) => return Err(Error::Io(e)),
                         Err(_) => {
                             // Timeout - try either readable or writable
                             tokio::select! {
@@ -229,15 +228,14 @@ impl AsyncSessionStream for UnixStream {
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
             BlockDirections::None => {
-                // No I/O needed right now. Schedule a wake-up if requested,
-                // otherwise just return Pending without immediate wake.
-                if let Some(dur) = sleep_dur {
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        sleep_async_fn(dur).await;
-                        waker.wake();
-                    });
-                }
+                // No I/O needed right now. Schedule a wake-up.
+                // IMPORTANT: We must always schedule a waker when returning Pending!
+                let waker = cx.waker().clone();
+                let dur = sleep_dur.unwrap_or(Duration::from_millis(1));
+                tokio::spawn(async move {
+                    sleep_async_fn(dur).await;
+                    waker.wake();
+                });
                 return Poll::Pending;
             }
             BlockDirections::Inbound => {
