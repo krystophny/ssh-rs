@@ -36,26 +36,79 @@ impl AsyncSessionStream for TcpStream {
 
             // Wait for whatever I/O the session needs, not what we expect.
             // The session knows the aggregate state of all channels.
-            match sess.block_directions() {
+            let dirs = sess.block_directions();
+            match dirs {
                 BlockDirections::None => {
                     println!("Block None");
-                    continue;
+                    // No I/O needed but operation still blocks?
+                    // Give some time for internal state to settle
+                    if let Some(dur) = sleep_dur {
+                        sleep_async_fn(dur).await;
+                    } else {
+                        tokio::task::yield_now().await;
+                    }
                 }
                 BlockDirections::Inbound => {
-                    println!("Block inbound");
+                    println!("Block inbound - waiting for readable");
                     // Session needs to read data (could be for any channel)
-                    self.readable().await?
+                    self.readable().await?;
+                    println!("Socket is now readable");
+                    
+                    // After socket is readable, immediately retry the operation
+                    // This is critical for libssh2 to make progress
+                    match op() {
+                        Ok(x) => {
+                            println!("Operation succeeded after readable!");
+                            return Ok(x);
+                        }
+                        Err(err) if !ssh2_error_is_would_block(&err) => {
+                            return Err(err.into());
+                        }
+                        _ => {
+                            println!("Still blocks after readable, continuing loop");
+                        }
+                    }
                 }
                 BlockDirections::Outbound => {
                     // Session needs to write data (could be for any channel)
-                    println!("Block outbound");
-                    self.writable().await?
+                    println!("Block outbound - waiting for writable");
+                    self.writable().await?;
+                    println!("Socket is now writable");
+                    
+                    // After socket is writable, immediately retry
+                    match op() {
+                        Ok(x) => {
+                            println!("Operation succeeded after writable!");
+                            return Ok(x);
+                        }
+                        Err(err) if !ssh2_error_is_would_block(&err) => {
+                            return Err(err.into());
+                        }
+                        _ => {
+                            println!("Still blocks after writable, continuing loop");
+                        }
+                    }
                 }
                 BlockDirections::Both => {
-                    println!("Block Both");
+                    println!("Block Both - waiting for read+write");
                     // Session needs both read and write
                     self.ready(tokio::io::Interest::READABLE | tokio::io::Interest::WRITABLE)
                         .await?;
+                    println!("Socket is now ready for both");
+                    
+                    // After socket is ready, immediately retry
+                    match op() {
+                        Ok(x) => {
+                            println!("Operation succeeded after ready!");
+                            return Ok(x);
+                        }
+                        Err(err) if !ssh2_error_is_would_block(&err) => {
+                            return Err(err.into());
+                        }
+                        _ => {
+                            println!("Still blocks after ready, continuing loop");
+                        }
+                    }
                 }
             }
 
@@ -111,15 +164,37 @@ impl AsyncSessionStream for TcpStream {
             }
         }
 
-        // Socket is now ready, try the operation again
-        match op() {
-            Err(err) if err.kind() == IoErrorKind::WouldBlock => {
-                // Still would block even though socket is ready?
-                // This shouldn't happen, but register for notification again
-                println!("WARN: Socket ready but operation still blocks");
-                Poll::Pending
+        // Socket is now ready, keep trying the operation until it succeeds
+        // or the socket is no longer ready
+        loop {
+            match op() {
+                Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                    // Check if we still need the same I/O
+                    let current_dirs = sess.block_directions();
+                    println!("After ready, op still blocks. Current directions: {:?}", current_dirs);
+                    
+                    // If directions became None, we need to re-evaluate  
+                    if current_dirs == BlockDirections::None {
+                        println!("Block directions changed, continuing outer loop");
+                        // Continue the outer loop to re-evaluate
+                        // But we need to schedule a wake since we're returning Pending
+                        let waker = cx.waker().clone();
+                        waker.wake();
+                        return Poll::Pending;
+                    }
+                    
+                    // Socket is ready but operation blocks - this is a libssh2 issue
+                    // We need to give it time to process
+                    println!("Yielding to let SSH library process");
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        tokio::task::yield_now().await;
+                        waker.wake();
+                    });
+                    return Poll::Pending;
+                }
+                ret => return Poll::Ready(ret),
             }
-            ret => Poll::Ready(ret),
         }
     }
 }
@@ -211,14 +286,33 @@ impl AsyncSessionStream for UnixStream {
             }
         }
 
-        // Socket is now ready, try the operation again
-        match op() {
-            Err(err) if err.kind() == IoErrorKind::WouldBlock => {
-                // Still would block even though socket is ready?
-                // This shouldn't happen, but register for notification again
-                Poll::Pending
+        // Socket is now ready, keep trying the operation
+        loop {
+            match op() {
+                Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                    // Check if we still need I/O
+                    let current_dirs = sess.block_directions();
+                    
+                    // If directions became None, we need to re-evaluate  
+                    if current_dirs == BlockDirections::None {
+                        // Continue the outer loop to re-evaluate
+                        // But we need to schedule a wake since we're returning Pending
+                        let waker = cx.waker().clone();
+                        waker.wake();
+                        return Poll::Pending;
+                    }
+                    
+                    // Socket is ready but operation blocks - this is a libssh2 issue
+                    // We need to give it time to process
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        tokio::task::yield_now().await;
+                        waker.wake();
+                    });
+                    return Poll::Pending;
+                }
+                ret => return Poll::Ready(ret),
             }
-            ret => Poll::Ready(ret),
         }
     }
 }
