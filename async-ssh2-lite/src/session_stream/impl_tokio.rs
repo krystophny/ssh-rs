@@ -183,15 +183,11 @@ impl AsyncSessionStream for TcpStream {
                         return Poll::Pending;
                     }
                     
-                    // Socket is ready but operation blocks - this is a libssh2 issue
-                    // We need to give it time to process
-                    println!("Yielding to let SSH library process");
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        tokio::task::yield_now().await;
-                        waker.wake();
-                    });
-                    return Poll::Pending;
+                    // Socket is ready but operation still blocks
+                    // Break out of this loop to re-check socket readiness
+                    // This prevents infinite yielding when libssh2 needs actual I/O
+                    println!("Breaking retry loop to re-check socket readiness");
+                    break;
                 }
                 ret => return Poll::Ready(ret),
             }
@@ -302,14 +298,10 @@ impl AsyncSessionStream for UnixStream {
                         return Poll::Pending;
                     }
                     
-                    // Socket is ready but operation blocks - this is a libssh2 issue
-                    // We need to give it time to process
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        tokio::task::yield_now().await;
-                        waker.wake();
-                    });
-                    return Poll::Pending;
+                    // Socket is ready but operation still blocks
+                    // Break out of this loop to re-check socket readiness
+                    // This prevents infinite yielding when libssh2 needs actual I/O
+                    break;
                 }
                 ret => return Poll::Ready(ret),
             }
