@@ -73,6 +73,7 @@ impl AsyncSessionStream for TcpStream {
         _expected_block_directions: BlockDirections,
         sleep_dur: Option<Duration>,
     ) -> Poll<Result<R, IoError>> {
+        // Try the operation first
         match op() {
             Err(err) if err.kind() == IoErrorKind::WouldBlock => {}
             ret => return Poll::Ready(ret),
@@ -110,9 +111,16 @@ impl AsyncSessionStream for TcpStream {
             }
         }
 
-        // The socket readiness checks above (poll_read_ready/poll_write_ready) already
-        // registered the waker with the reactor, so we just return Pending
-        Poll::Pending
+        // Socket is now ready, try the operation again
+        match op() {
+            Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                // Still would block even though socket is ready?
+                // This shouldn't happen, but register for notification again
+                println!("WARN: Socket ready but operation still blocks");
+                Poll::Pending
+            }
+            ret => Poll::Ready(ret),
+        }
     }
 }
 
@@ -169,6 +177,7 @@ impl AsyncSessionStream for UnixStream {
         _expected_block_directions: BlockDirections,
         sleep_dur: Option<Duration>,
     ) -> Poll<Result<R, IoError>> {
+        // Try the operation first
         match op() {
             Err(err) if err.kind() == IoErrorKind::WouldBlock => {}
             ret => return Poll::Ready(ret),
@@ -202,9 +211,15 @@ impl AsyncSessionStream for UnixStream {
             }
         }
 
-        // The socket readiness checks above (poll_read_ready/poll_write_ready) already
-        // registered the waker with the reactor, so we just return Pending
-        Poll::Pending
+        // Socket is now ready, try the operation again
+        match op() {
+            Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                // Still would block even though socket is ready?
+                // This shouldn't happen, but register for notification again
+                Poll::Pending
+            }
+            ret => Poll::Ready(ret),
+        }
     }
 }
 
