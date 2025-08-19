@@ -24,12 +24,24 @@ impl AsyncSessionStream for TcpStream {
         _expected_block_directions: BlockDirections,
         sleep_dur: Option<Duration>,
     ) -> Result<R, Error> {
+        let mut operation_count = 0;
         loop {
+            operation_count += 1;
             match op() {
-                Ok(x) => return Ok(x),
+                Ok(x) => {
+                    if operation_count > 1 {
+                        println!("Operation succeeded after {} attempts", operation_count);
+                    }
+                    return Ok(x);
+                }
                 Err(err) => {
                     if !ssh2_error_is_would_block(&err) {
                         return Err(err.into());
+                    }
+                    if operation_count == 1 {
+                        println!("Initial operation blocks, checking directions");
+                    } else if operation_count % 10 == 0 {
+                        println!("Operation still blocking after {} attempts", operation_count);
                     }
                 }
             }
@@ -39,7 +51,7 @@ impl AsyncSessionStream for TcpStream {
             let dirs = sess.block_directions();
             match dirs {
                 BlockDirections::None => {
-                    println!("Block None - operation blocks but no I/O needed");
+                    println!("Block None - operation blocks but no I/O needed (attempt {})", operation_count);
                     // This should be rare - operation blocks but libssh2 says no I/O needed
                     // Use a longer delay to avoid spinning, then retry
                     sleep_async_fn(Duration::from_millis(10)).await;
@@ -199,7 +211,10 @@ impl AsyncSessionStream for TcpStream {
                             });
                             return Poll::Pending;
                         }
-                        ret => return Poll::Ready(ret),
+                        ret => {
+                            println!("Retry succeeded!");
+                            return Poll::Ready(ret);
+                        }
                     }
                 }
                 ret => return Poll::Ready(ret),
@@ -267,8 +282,12 @@ impl AsyncSessionStream for UnixStream {
     ) -> Poll<Result<R, IoError>> {
         // Try the operation first
         match op() {
-            Err(err) if err.kind() == IoErrorKind::WouldBlock => {}
-            ret => return Poll::Ready(ret),
+            Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                println!("poll operation blocks - checking directions");
+            }
+            ret => {
+                return Poll::Ready(ret);
+            }
         }
 
         // Wait for whatever I/O the session needs, not what we expect.
@@ -286,8 +305,10 @@ impl AsyncSessionStream for UnixStream {
                 return Poll::Pending;
             }
             BlockDirections::Inbound => {
+                println!("poll Block Inbound - waiting for socket readiness");
                 // Session needs to read data (could be for any channel)
                 ready!(self.poll_read_ready(cx))?;
+                println!("poll socket now ready for reading");
             }
             BlockDirections::Outbound => {
                 // Session needs to write data (could be for any channel)
