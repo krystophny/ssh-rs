@@ -175,37 +175,30 @@ impl AsyncSessionStream for TcpStream {
                     
                     // If directions became None, we need to re-evaluate  
                     if current_dirs == BlockDirections::None {
-                        println!("Block directions changed, continuing outer loop");
-                        // Continue the outer loop to re-evaluate
-                        // But we need to schedule a wake since we're returning Pending
+                        println!("Block directions changed to None");
+                        // Schedule immediate wake to re-evaluate
                         let waker = cx.waker().clone();
-                        waker.wake();
+                        tokio::spawn(async move {
+                            tokio::task::yield_now().await;
+                            waker.wake();
+                        });
                         return Poll::Pending;
                     }
                     
-                    // Socket was ready but operation still blocks
-                    // We need to wait for the socket to actually have data/space available
-                    // Re-check the specific I/O readiness that libssh2 needs
-                    println!("Re-checking socket readiness for {:?}", current_dirs);
-                    match current_dirs {
-                        BlockDirections::Inbound => {
-                            ready!(self.poll_read_ready(cx))?;
-                        }
-                        BlockDirections::Outbound => {
-                            ready!(self.poll_write_ready(cx))?;
-                        }
-                        BlockDirections::Both => {
-                            ready!(self.poll_read_ready(cx))?;
-                            ready!(self.poll_write_ready(cx))?;
-                        }
-                        BlockDirections::None => {
-                            // This shouldn't happen here, but handle it
-                            let waker = cx.waker().clone();
-                            waker.wake();
-                            return Poll::Pending;
-                        }
-                    }
-                    // Continue the retry loop after re-checking readiness
+                    // Socket was marked ready but operation still blocks
+                    // This happens when libssh2's internal state isn't ready yet
+                    // We need to give it a chance to process and then retry
+                    println!("Socket ready but op blocks, yielding for {:?}", current_dirs);
+                    
+                    // Clear the readiness state and wait for new I/O event
+                    // This prevents infinite loops where socket appears ready but isn't
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        // Small delay to let libssh2 process
+                        tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
+                        waker.wake();
+                    });
+                    return Poll::Pending;
                 }
                 ret => return Poll::Ready(ret),
             }
@@ -309,35 +302,28 @@ impl AsyncSessionStream for UnixStream {
                     
                     // If directions became None, we need to re-evaluate  
                     if current_dirs == BlockDirections::None {
-                        // Continue the outer loop to re-evaluate
-                        // But we need to schedule a wake since we're returning Pending
+                        // Schedule immediate wake to re-evaluate
                         let waker = cx.waker().clone();
-                        waker.wake();
+                        tokio::spawn(async move {
+                            tokio::task::yield_now().await;
+                            waker.wake();
+                        });
                         return Poll::Pending;
                     }
                     
-                    // Socket was ready but operation still blocks
-                    // We need to wait for the socket to actually have data/space available
-                    // Re-check the specific I/O readiness that libssh2 needs
-                    match current_dirs {
-                        BlockDirections::Inbound => {
-                            ready!(self.poll_read_ready(cx))?;
-                        }
-                        BlockDirections::Outbound => {
-                            ready!(self.poll_write_ready(cx))?;
-                        }
-                        BlockDirections::Both => {
-                            ready!(self.poll_read_ready(cx))?;
-                            ready!(self.poll_write_ready(cx))?;
-                        }
-                        BlockDirections::None => {
-                            // This shouldn't happen here, but handle it
-                            let waker = cx.waker().clone();
-                            waker.wake();
-                            return Poll::Pending;
-                        }
-                    }
-                    // Continue the retry loop after re-checking readiness
+                    // Socket was marked ready but operation still blocks
+                    // This happens when libssh2's internal state isn't ready yet
+                    // We need to give it a chance to process and then retry
+                    
+                    // Clear the readiness state and wait for new I/O event
+                    // This prevents infinite loops where socket appears ready but isn't
+                    let waker = cx.waker().clone();
+                    tokio::spawn(async move {
+                        // Small delay to let libssh2 process
+                        tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
+                        waker.wake();
+                    });
+                    return Poll::Pending;
                 }
                 ret => return Poll::Ready(ret),
             }
