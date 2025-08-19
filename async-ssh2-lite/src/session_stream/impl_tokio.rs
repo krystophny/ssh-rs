@@ -183,11 +183,29 @@ impl AsyncSessionStream for TcpStream {
                         return Poll::Pending;
                     }
                     
-                    // Socket is ready but operation still blocks
-                    // Break out of this loop to re-check socket readiness
-                    // This prevents infinite yielding when libssh2 needs actual I/O
-                    println!("Breaking retry loop to re-check socket readiness");
-                    break;
+                    // Socket was ready but operation still blocks
+                    // We need to wait for the socket to actually have data/space available
+                    // Re-check the specific I/O readiness that libssh2 needs
+                    println!("Re-checking socket readiness for {:?}", current_dirs);
+                    match current_dirs {
+                        BlockDirections::Inbound => {
+                            ready!(self.poll_read_ready(cx))?;
+                        }
+                        BlockDirections::Outbound => {
+                            ready!(self.poll_write_ready(cx))?;
+                        }
+                        BlockDirections::Both => {
+                            ready!(self.poll_read_ready(cx))?;
+                            ready!(self.poll_write_ready(cx))?;
+                        }
+                        BlockDirections::None => {
+                            // This shouldn't happen here, but handle it
+                            let waker = cx.waker().clone();
+                            waker.wake();
+                            return Poll::Pending;
+                        }
+                    }
+                    // Continue the retry loop after re-checking readiness
                 }
                 ret => return Poll::Ready(ret),
             }
@@ -298,10 +316,28 @@ impl AsyncSessionStream for UnixStream {
                         return Poll::Pending;
                     }
                     
-                    // Socket is ready but operation still blocks
-                    // Break out of this loop to re-check socket readiness
-                    // This prevents infinite yielding when libssh2 needs actual I/O
-                    break;
+                    // Socket was ready but operation still blocks
+                    // We need to wait for the socket to actually have data/space available
+                    // Re-check the specific I/O readiness that libssh2 needs
+                    match current_dirs {
+                        BlockDirections::Inbound => {
+                            ready!(self.poll_read_ready(cx))?;
+                        }
+                        BlockDirections::Outbound => {
+                            ready!(self.poll_write_ready(cx))?;
+                        }
+                        BlockDirections::Both => {
+                            ready!(self.poll_read_ready(cx))?;
+                            ready!(self.poll_write_ready(cx))?;
+                        }
+                        BlockDirections::None => {
+                            // This shouldn't happen here, but handle it
+                            let waker = cx.waker().clone();
+                            waker.wake();
+                            return Poll::Pending;
+                        }
+                    }
+                    // Continue the retry loop after re-checking readiness
                 }
                 ret => return Poll::Ready(ret),
             }
