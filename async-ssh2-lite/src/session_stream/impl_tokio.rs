@@ -39,14 +39,10 @@ impl AsyncSessionStream for TcpStream {
             let dirs = sess.block_directions();
             match dirs {
                 BlockDirections::None => {
-                    println!("Block None");
-                    // No I/O needed but operation still blocks?
-                    // Give some time for internal state to settle
-                    if let Some(dur) = sleep_dur {
-                        sleep_async_fn(dur).await;
-                    } else {
-                        tokio::task::yield_now().await;
-                    }
+                    println!("Block None - operation blocks but no I/O needed");
+                    // This should be rare - operation blocks but libssh2 says no I/O needed
+                    // Use a longer delay to avoid spinning, then retry
+                    sleep_async_fn(Duration::from_millis(10)).await;
                 }
                 BlockDirections::Inbound => {
                     println!("Block inbound - waiting for readable");
@@ -235,7 +231,11 @@ impl AsyncSessionStream for UnixStream {
             // Wait for whatever I/O the session needs, not what we expect.
             // The session knows the aggregate state of all channels.
             match sess.block_directions() {
-                BlockDirections::None => continue,
+                BlockDirections::None => {
+                    println!("UnixStream Block None - operation blocks but no I/O needed");
+                    // This should be rare - use a longer delay to avoid spinning
+                    sleep_async_fn(Duration::from_millis(10)).await;
+                }
                 BlockDirections::Inbound => {
                     // Session needs to read data (could be for any channel)
                     self.readable().await?
@@ -275,9 +275,10 @@ impl AsyncSessionStream for UnixStream {
         // The session knows the aggregate state of all channels.
         match sess.block_directions() {
             BlockDirections::None => {
-                // No I/O needed - schedule a waker to retry later
+                println!("poll Block None - scheduling longer delay");
+                // No I/O needed - use a longer delay to avoid spinning
                 let waker = cx.waker().clone();
-                let dur = sleep_dur.unwrap_or(Duration::from_millis(1));
+                let dur = Duration::from_millis(50); // Much longer delay for None case
                 tokio::spawn(async move {
                     sleep_async_fn(dur).await;
                     waker.wake();
