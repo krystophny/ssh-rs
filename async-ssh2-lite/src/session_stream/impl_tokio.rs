@@ -186,19 +186,25 @@ impl AsyncSessionStream for TcpStream {
                     }
                     
                     // Socket was marked ready but operation still blocks
-                    // This happens when libssh2's internal state isn't ready yet
-                    // We need to give it a chance to process and then retry
-                    println!("Socket ready but op blocks, yielding for {:?}", current_dirs);
+                    // This can happen when:
+                    // 1. libssh2's internal buffers need processing
+                    // 2. The socket readiness was spurious
+                    // Try the operation one more time immediately
+                    println!("Socket ready but op blocks, retrying once for {:?}", current_dirs);
                     
-                    // Clear the readiness state and wait for new I/O event
-                    // This prevents infinite loops where socket appears ready but isn't
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        // Small delay to let libssh2 process
-                        tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
-                        waker.wake();
-                    });
-                    return Poll::Pending;
+                    match op() {
+                        Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                            // Still blocks after retry - yield briefly to let libssh2 process
+                            println!("Still blocks after retry, yielding");
+                            let waker = cx.waker().clone();
+                            tokio::spawn(async move {
+                                tokio::task::yield_now().await;
+                                waker.wake();
+                            });
+                            return Poll::Pending;
+                        }
+                        ret => return Poll::Ready(ret),
+                    }
                 }
                 ret => return Poll::Ready(ret),
             }
@@ -312,18 +318,19 @@ impl AsyncSessionStream for UnixStream {
                     }
                     
                     // Socket was marked ready but operation still blocks
-                    // This happens when libssh2's internal state isn't ready yet
-                    // We need to give it a chance to process and then retry
-                    
-                    // Clear the readiness state and wait for new I/O event
-                    // This prevents infinite loops where socket appears ready but isn't
-                    let waker = cx.waker().clone();
-                    tokio::spawn(async move {
-                        // Small delay to let libssh2 process
-                        tokio::time::sleep(tokio::time::Duration::from_micros(100)).await;
-                        waker.wake();
-                    });
-                    return Poll::Pending;
+                    // Try the operation one more time immediately
+                    match op() {
+                        Err(err) if err.kind() == IoErrorKind::WouldBlock => {
+                            // Still blocks after retry - yield briefly to let libssh2 process
+                            let waker = cx.waker().clone();
+                            tokio::spawn(async move {
+                                tokio::task::yield_now().await;
+                                waker.wake();
+                            });
+                            return Poll::Pending;
+                        }
+                        ret => return Poll::Ready(ret),
+                    }
                 }
                 ret => return Poll::Ready(ret),
             }
